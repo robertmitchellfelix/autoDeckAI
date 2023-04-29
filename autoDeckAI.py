@@ -1,70 +1,90 @@
+#pip install dash
+#pip install dash-bootstrap-components
 #pip install openai
+#http://127.0.0.1:8050/
 
-import tkinter as tk
-from tkinter import ttk
-import threading
 import json
 import openai
+import dash
+import dash_core_components as dcc
+import dash_html_components as html
+import dash_bootstrap_components as dbc
+from dash.dependencies import Input, Output, State
 
-apiKey = input("Enter OpenAI API Key: ")
-openai.api_key = apiKey #https://platform.openai.com/account/billing/overview
-
-def ask_question():
-    ask_button.configure(text="Loading")
-    threading.Thread(target=get_flashcards).start()
-
-def get_flashcards():
-    question = question_text.get("1.0", tk.END).strip()
-
+def getFlashcards(apiKey, question, temperature):
     if question.lower() == "exit":
-        window.destroy()
-        return
+        return None
+
+    openai.api_key = apiKey #https://platform.openai.com/account/billing/overview
 
     completion = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are a consistent elementary teacher. Please make a formatted text database of ten reading comprehension questions you create based on my input. Your response will use the following JSON format:  [{front: \"question, possible answer 1, possible answer 2, possible answer 3, possible answer 4\", back: \"corect answer\"}, {front:\"..\", back: \"..\"}, ...]"},
             {"role": "user", "content": question}
-            ]
+            ],
+        temperature=temperature
         )
-    response_label.config(text=completion.choices[0].message.content)
-    save_to_json(completion.choices[0].message.content)  # Call the function to save the content to a JSON file
-    ask_button.configure(text="Ask")
+    saveToJson(completion.choices[0].message.content)
+    return completion.choices[0].message.content
 
-def save_to_json(content):
+def saveToJson(content):
     data = {"response": content}
-    with open("response.json", "a") as json_file:
-        json.dump(data, json_file)
-        json_file.write("\n")
+    with open("response.json", "a") as jsonFile:
+        json.dump(data, jsonFile)
+        jsonFile.write("\n")
 
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-# Create the main window
-window = tk.Tk()
-window.title("Flashcard Generator")
-window.geometry("1080x1080")
+app.layout = dbc.Container([
+    html.H1("Auto Deck"),
+    dbc.Input(id="apiKey", type="password", placeholder="Enter OpenAI API Key", className="mb-3"),
+    dbc.Row([
+        dbc.Col(dbc.Checkbox(id="showKeyCheckbox", className="form-check-input"), width="auto"),
+        dbc.Col(html.Label("Show API Key", htmlFor="showKeyCheckbox", className="form-check-label"))
+    ], className="mb-3"),
+    dbc.Textarea(id="questionText", placeholder="Enter Content", className="mb-3"),
+    dcc.Slider(
+        id='tempSlider',
+        min=0,
+        max=1,
+        step=0.1,
+        value=0.5,
+        marks={i/10: str(i/10) for i in range(0, 11)},
+        className="mb-3"
+    ),
+    html.Div(id='sliderOutput', className="mb-3"),
+    dbc.Button("Enter", id="enterButton", color="primary", className="mb-3"),
+    html.Div(id="responseDiv")
+])
 
-# Create and place the widgets
-frame = ttk.Frame(window, padding="4 4 12 12")
-frame.grid(column=0, row=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-window.columnconfigure(0, weight=1)
-window.rowconfigure(0, weight=1)
+@app.callback(
+    Output("responseDiv", "children"),
+    Output("enterButton", "children"),
+    Input("enterButton", "n_clicks"),
+    State("apiKey", "value"),
+    State("questionText", "value"),
+    State("tempSlider", "value")
+)
+def askQuestion(nClicks, apiKey, question, temp):
+    if nClicks is not None and apiKey:
+        response = getFlashcards(apiKey, question, temp)
+        return response, "Enter"
+    return dash.no_update, "Enter"
 
-question_label = ttk.Label(frame, text="Enter content:")
-question_label.grid(column=1, row=1, sticky=tk.W)
+@app.callback(
+    Output("apiKey", "type"),
+    Input("showKeyCheckbox", "value")
+)
+def toggleAPIKeyVisibility(checked):
+    return "text" if checked else "password"
 
-question_text = tk.Text(frame, height=4)
-question_text.grid(column=2, row=1, sticky=(tk.W, tk.E), padx=4)
+@app.callback(
+    Output("sliderOutput", "children"),
+    Input("tempSlider", "value")
+)
+def updateSliderOutput(value):
+    return f"Creativity: {value}"
 
-# Add a scrollbar to the text widget
-question_scrollbar = ttk.Scrollbar(frame, orient="vertical", command=question_text.yview)
-question_scrollbar.grid(column=3, row=1, sticky="NS")
-question_text.config(yscrollcommand=question_scrollbar.set)
-
-ask_button = ttk.Button(frame, text="Ask", command=ask_question)
-ask_button.grid(column=4, row=1, sticky=tk.W)
-
-response_label = ttk.Label(frame, text="", wraplength=400)
-response_label.grid(column=1, row=4, columnspan=4, sticky=(tk.W, tk.E), pady=10)
-
-# Start the main event loop
-window.mainloop()
+if __name__ == "__main__":
+    app.run_server(debug=True)
